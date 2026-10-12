@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>فحص PWA</title>
+<style>
+body{margin:0;padding:16px;font-family:system-ui,Tahoma,sans-serif;background:#EDF1EF;color:#10201C;line-height:1.7}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:20px 0 8px}
+.r{display:flex;gap:8px;align-items:baseline;background:#fff;border:1px solid #D3DCD8;border-radius:12px;padding:8px 12px;margin-bottom:6px;font-size:15px}
+.r b{flex:none;width:22px}.r small{color:#5B6B66;display:block}
+.ok b{color:#1a8f4c}.no{background:#fdecea;border-color:#e0a39d}.no b{color:#c0392b}.wn b{color:#c78a00}
+#sum{font-weight:800;margin:10px 0}button{font:inherit;padding:10px 16px;border-radius:12px;border:0;background:#D4F34A;font-weight:800}
+</style></head><body>
+<h1>فحص PWA</h1><div id="sum">جارٍ الفحص…</div>
+<button id="rb">إعادة الفحص</button>
+<h2>الملفات</h2><div id="files"></div>
+<h2>Service Worker</h2><div id="sw"></div>
+<h2>Manifest</h2><div id="mf"></div>
+<h2>التخزين والعمل بدون إنترنت</h2><div id="st"></div>
+<script>
+var FILES=['index.html','manifest.webmanifest','sw.js','storage.js','check.html','icon-192.png','icon-512.png','maskable-192.png','maskable-512.png','apple-touch-icon.png','favicon-32.png'];
+var bad=0,warn=0;
+function row(id,state,t,sm){var d=document.createElement('div');d.className='r '+(state==='ok'?'ok':state==='wn'?'wn':'no');
+d.innerHTML='<b>'+(state==='ok'?'✓':state==='wn'?'!':'✗')+'</b><span>'+t+(sm?'<small>'+sm+'</small>':'')+'</span>';
+document.getElementById(id).appendChild(d);if(state==='no')bad++;if(state==='wn')warn++}
+function img(src){return new Promise(function(ok){var i=new Image();i.onload=function(){ok(i.naturalWidth+'x'+i.naturalHeight)};i.onerror=function(){ok(null)};i.src=src+'?c='+Date.now()})}
+async function run(){
+bad=warn=0;['files','sw','mf','st'].forEach(function(i){document.getElementById(i).innerHTML=''});
+var sec=location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1';
+row('files',sec?'ok':'no','اتصال آمن (HTTPS)',location.origin);
+for(var f of FILES){try{var r=await fetch(f,{cache:'no-store'});row('files',r.ok?'ok':'no',f,r.ok?'':'الحالة '+r.status)}catch(e){row('files','no',f,'تعذّر الوصول')}}
+if(!('serviceWorker' in navigator))row('sw','no','المتصفح لا يدعم Service Worker');
+else{var reg=await navigator.serviceWorker.getRegistration('./');
+if(!reg)row('sw','no','غير مسجّل','افتح index.html مرة واحدة ثم أعد الفحص');
+else{var w=reg.active||reg.waiting||reg.installing;row('sw',reg.active?'ok':'wn','مسجّل · الحالة: '+(w?w.state:'—'),reg.scope);
+row('sw',navigator.serviceWorker.controller?'ok':'wn','يتحكم بهذه الصفحة',navigator.serviceWorker.controller?'':'أعد تحميل الصفحة مرة واحدة');
+try{var t=await (await fetch('sw.js',{cache:'no-store'})).text();row('sw',/addEventListener\(\s*['"]fetch['"]/.test(t)?'ok':'no','معالج fetch موجود');row('sw',/^\s*(const|var|let)\s+VERSION\s*=/.test(t)?'ok':'wn','رقم النسخة في أول سطر',(t.split('\n')[0]||'').slice(0,60))}catch(e){}}}
+try{var m=await (await fetch('manifest.webmanifest',{cache:'no-store'})).json();
+['name','short_name','start_url','scope','display','lang','dir'].forEach(function(k){row('mf',m[k]?'ok':'no',k+': '+(m[k]||'مفقود'))});
+row('mf',m.display==='standalone'?'ok':'no','display = standalone');
+row('mf',/^(\.\/)?index\.html$/.test(m.start_url||'')?'ok':'wn','start_url داخل النطاق');
+var ic=m.icons||[],has={};for(var i of ic){var sz=await img(i.src);var want=(i.sizes||'').split(/\s+/)[0];
+row('mf',sz&&sz===want?'ok':'no',i.src+' · '+(i.purpose||'any'),sz?'الحجم الفعلي '+sz:'الملف غير موجود');has[(i.purpose||'any')+want]=1}
+row('mf',has['any192x192']&&has['any512x512']?'ok':'no','أيقونات 192 و512');
+row('mf',has['maskable192x192']&&has['maskable512x512']?'ok':'wn','أيقونات maskable')}catch(e){row('mf','no','تعذّر قراءة manifest')}
+if(navigator.storage&&navigator.storage.persisted){var p=await navigator.storage.persisted();row('st',p?'ok':'wn','التخزين الدائم (persist)',p?'':'قد يمنحه المتصفح بعد التثبيت أو الاستخدام')}
+else row('st','wn','persist غير مدعوم');
+try{var db=await new Promise(function(ok,no){var q=indexedDB.open('pwa-backup');q.onsuccess=function(){ok(q.result)};q.onerror=no});
+var has2=db.objectStoreNames.contains('ls');var n=0;if(has2)n=await new Promise(function(ok){var c=db.transaction('ls').objectStore('ls').count();c.onsuccess=function(){ok(c.result)}});db.close();
+row('st',has2?'ok':'wn','نسخة IndexedDB الاحتياطية',has2?n+' عنصر':'تُنشأ بعد فتح التطبيق')}catch(e){row('st','wn','IndexedDB غير متاح')}
+if(window.caches){var ks=await caches.keys();var cnt=0;for(var k of ks){cnt+=(await (await caches.open(k)).keys()).length}
+row('st',cnt>=FILES.length-2?'ok':'wn','ملفات مخزنة للعمل بدون إنترنت: '+cnt,ks.join(' · '))}
+document.getElementById('sum').textContent=bad?('✗ '+bad+' مشكلة'+(warn?' و'+warn+' تنبيه':'')):(warn?'✓ جاهز مع '+warn+' تنبيه':'✓ كل شيء سليم')}
+document.getElementById('rb').onclick=run;run();
+</script></body></html>
